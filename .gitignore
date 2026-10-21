@@ -1,0 +1,41 @@
+
+# Environment variables and API keys
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+
+# Python virtual environments
+.venv/
+venv/
+env/
+
+# Python temporary files
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Cached AI extraction data
+cache/
+.cache/
+**/cache/
+**/.cache/
+*.sqlite3
+
+# Uploaded or generated documents
+uploads/
+**/uploads/
+*.pdf
+
+# Frontend dependencies and builds
+node_modules/
+dist/
+build/
+
+# IDE and operating system
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
