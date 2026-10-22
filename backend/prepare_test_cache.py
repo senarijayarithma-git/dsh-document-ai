@@ -78,6 +78,7 @@ for document_type, document in documents.items():
     save_cached_result(
         cache_key,
         document["data"],
+        source="synthetic_test",
     )
 
     print(f"Cache prepared: {filename}")

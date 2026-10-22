@@ -1,3 +1,5 @@
+from importlib.metadata import files
+
 from .ai_extraction import (
     extract_structured_data,
     DOCUMENT_SCHEMAS,
@@ -250,7 +252,21 @@ async def upload_and_extract(
 
     if cached_data is not None:
         print(f"Cache HIT: {document_type}", flush=True)
-        extracted_data = cached_data
+
+        extraction_source = cached_data["source"]
+
+        # Reject synthetic and unknown legacy cache data
+        if extraction_source != "gemini_live":
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Untrusted cache for {document_type}: "
+                    f"{extraction_source}. "
+                    "A fresh Gemini extraction is required."
+                ),
+            )
+
+        extracted_data = cached_data["extracted_data"]
         from_cache = True
 
     else:
@@ -272,17 +288,26 @@ async def upload_and_extract(
 
         extracted_data = result.model_dump(mode="json")
 
-        # Save successful extraction for future requests
-        save_cached_result(cache_key, extracted_data)
+        # Save successful Gemini extraction
+        save_cached_result(
+            cache_key,
+            extracted_data,
+            source="gemini_live",
+        )
+
+        extraction_source = "gemini_live"
         from_cache = False
+
 
     return {
         "filename": file.filename,
         "document_type": document_type,
         "pages_processed": len(pages),
         "from_cache": from_cache,
-        "extracted_data": extracted_data
+        "extraction_source": extraction_source,
+        "extracted_data": extracted_data,
     }
+
 
 
 # =====================================
@@ -414,6 +439,7 @@ async def upload_and_verify_shipment(
     }
 
     extracted = {}
+    extraction_sources = {}
 
     for document_type, uploaded_file in files.items():
 
@@ -445,10 +471,28 @@ async def upload_and_verify_shipment(
 
         cached_data = get_cached_result(cache_key)
 
+
         if cached_data is not None:
             print(f"Cache HIT: {document_type}", flush=True)
 
-            extracted[document_type] = cached_data
+            source = cached_data["source"]
+
+            # Reject untrusted cache data
+            if source != "gemini_live":
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        f"Untrusted cache for {document_type}: {source}. "
+                        "A fresh Gemini extraction is required."
+                    ),
+                )
+
+            extracted[document_type] = cached_data["extracted_data"]
+
+            extraction_sources[document_type] = {
+                "from_cache": True,
+                "extraction_source": source,
+            }
 
         else:
             print(f"Cache MISS: {document_type}", flush=True)
@@ -487,49 +531,51 @@ async def upload_and_verify_shipment(
 
             extracted_data = result.model_dump(mode="json")
 
-            # Save immediately, before processing the next PDF
-            save_cached_result(cache_key, extracted_data)
+            # Save successful Gemini extraction
+            save_cached_result(
+                cache_key,
+                extracted_data,
+                source="gemini_live",
+            )
 
             extracted[document_type] = extracted_data
 
-
-    invoice = convert_invoice(extracted["invoice"])
-
-    packing = convert_packing_list(
-        extracted["packing_list"]
-    )
-
-    awb = convert_air_waybill(
-        extracted["air_waybill"]
-    )
-
-
-    findings = validate_shipment(
-        invoice,
-        packing,
-        awb,
-        packing_filename=packing_list_file.filename or "unknown_packing_list.pdf",
-        awb_filename=air_waybill_file.filename or "unknown_air_waybill.pdf",
-        invoice_filename=invoice_file.filename or "unknown_invoice.pdf",
-    )
-
-
-    
-    report = build_verification_report(findings)
-
-    return {
-        "message": "Shipment verification completed",
-        "documents": {
-            key: {
-                "filename": files[key].filename,
-                "extracted_data": extracted[key],
+            extraction_sources[document_type] = {
+                "from_cache": False,
+                "extraction_source": "gemini_live",
             }
-            for key in files
-        },
-        "summary": {
-            "total_checks": report["total_checks"],
-            **report["summary"],
-        },
-        "findings": report["findings"],
-        "report": report,
-    }
+        invoice = convert_invoice(extracted["invoice"])
+
+        packing = convert_packing_list(extracted["packing_list"])
+
+        awb = convert_air_waybill(extracted["air_waybill"])
+
+        findings = validate_shipment(
+            invoice,
+            packing,
+            awb,
+            packing_filename=packing_list_file.filename or "unknown_packing_list.pdf",
+            awb_filename=air_waybill_file.filename or "unknown_air_waybill.pdf",
+            invoice_filename=invoice_file.filename or "unknown_invoice.pdf",
+        )
+
+        report = build_verification_report(findings)
+
+        return {
+            "message": "Shipment verification completed",
+            "documents": {
+                key: {
+                    "filename": files[key].filename,
+                    "from_cache": extraction_sources[key]["from_cache"],
+                    "extraction_source": extraction_sources[key]["extraction_source"],
+                    "extracted_data": extracted[key],
+                }
+                for key in files
+            },
+            "summary": {
+                "total_checks": report["total_checks"],
+                **report["summary"],
+            },
+            "findings": report["findings"],
+            "report": report,
+        }

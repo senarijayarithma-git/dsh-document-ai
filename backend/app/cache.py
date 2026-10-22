@@ -25,7 +25,8 @@ def generate_cache_key(
 
 def get_cached_result(cache_key: str):
     """
-    Retrieve previously extracted JSON.
+    Retrieve cached extraction data and its source.
+    Supports both new and legacy cache formats.
     """
     cache_file = CACHE_DIR / f"{cache_key}.json"
 
@@ -33,21 +34,50 @@ def get_cached_result(cache_key: str):
         return None
 
     with cache_file.open("r", encoding="utf-8") as file:
-        return json.load(file)
+        cached = json.load(file)
+
+    # New cache format
+    if (
+        isinstance(cached, dict)
+        and "source" in cached
+        and "extracted_data" in cached
+    ):
+        return cached
+
+    # Old cache format: origin cannot be trusted
+    return {
+        "source": "unknown_legacy",
+        "extracted_data": cached,
+    }
 
 
 def save_cached_result(
     cache_key: str,
     extracted_data: dict,
+    source: str,
 ):
     """
-    Save a successful extraction as JSON.
+    Save extracted data with its original source.
     """
+
+    allowed_sources = {
+        "gemini_live",
+        "synthetic_test",
+    }
+
+    if source not in allowed_sources:
+        raise ValueError(f"Invalid extraction source: {source}")
+
     cache_file = CACHE_DIR / f"{cache_key}.json"
+
+    cache_record = {
+        "source": source,
+        "extracted_data": extracted_data,
+    }
 
     with cache_file.open("w", encoding="utf-8") as file:
         json.dump(
-            extracted_data,
+            cache_record,
             file,
             indent=4,
             ensure_ascii=False,
