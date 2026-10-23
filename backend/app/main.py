@@ -6,6 +6,7 @@ from .ai_extraction import (
 )
 
 from fastapi import FastAPI, UploadFile, File, HTTPException
+from google.genai import errors
 from pydantic import BaseModel
 from .schemas import Invoice, PackingList, AirWaybill
 from .validation import validate_shipment
@@ -149,18 +150,45 @@ def extract_structured(
 
         return result.model_dump(mode="json")
 
+
+    except errors.APIError as exc:
+        print(
+            "Gemini API error:",
+            type(exc).__name__,
+            str(exc),
+            flush=True
+        )
+
+        if exc.code == 429:
+            raise HTTPException(
+                status_code=429,
+                detail="Gemini rate limit or quota reached. Please try again later."
+            ) from exc
+
+        if exc.code == 503:
+            raise HTTPException(
+                status_code=503,
+                detail="Gemini is temporarily unavailable. Please try again later."
+            ) from exc
+
+        raise HTTPException(
+            status_code=502,
+            detail="Gemini API extraction failed."
+        ) from exc
+
     except Exception as exc:
         print(
-            "Gemini extraction error:",
+            "Unexpected extraction error:",
             type(exc).__name__,
             str(exc),
             flush=True
         )
 
         raise HTTPException(
-            status_code=502,
-            detail="Gemini extraction failed. Check VS Code terminal."
-        )
+            status_code=500,
+            detail="An unexpected extraction error occurred."
+        ) from exc
+
 
 @app.post("/documents/upload-and-extract")
 async def upload_and_extract(
@@ -219,14 +247,22 @@ async def upload_and_extract(
                     ).strip()
 
                 pages.append(text)
-
     except HTTPException:
         raise
+
+    except (pymupdf.FileDataError, pymupdf.EmptyFileError) as exc:
+        print("Invalid PDF:", repr(exc), flush=True)
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid or corrupted PDF file"
+        ) from exc
+
     except pytesseract.TesseractNotFoundError:
         raise HTTPException(
             status_code=500,
             detail="Tesseract OCR is not installed or configured"
         )
+
     except Exception as exc:
         print("PDF processing error:", repr(exc), flush=True)
         raise HTTPException(
@@ -279,12 +315,43 @@ async def upload_and_extract(
                 document_type=document_type
             )
 
-        except Exception as exc:
-            print("Gemini extraction error:", repr(exc), flush=True)
+        except errors.APIError as exc:
+            print(
+                "Gemini API extraction error:",
+                type(exc).__name__,
+                str(exc),
+                flush=True,
+            )
+
+            if exc.code == 429:
+                raise HTTPException(
+                    status_code=429,
+                    detail="Gemini rate limit or quota reached. Please try again later.",
+                ) from exc
+
+            if exc.code == 503:
+                raise HTTPException(
+                    status_code=503,
+                    detail="Gemini is temporarily unavailable. Please try again later.",
+                ) from exc
+
             raise HTTPException(
                 status_code=502,
-                detail="Gemini extraction failed. Check backend logs."
+                detail="Gemini API extraction failed.",
+            ) from exc
+
+        except Exception as exc:
+            print(
+                "Unexpected PDF extraction error:",
+                type(exc).__name__,
+                str(exc),
+                flush=True,
             )
+
+            raise HTTPException(
+                status_code=500,
+                detail="An unexpected extraction error occurred.",
+            ) from exc
 
         extracted_data = result.model_dump(mode="json")
 
@@ -423,14 +490,28 @@ async def upload_and_verify_shipment(
                     text_parts.append(page_text)
 
                 return "\n".join(text_parts)
-
         except HTTPException:
             raise
-        except Exception as exc:
+        except (pymupdf.FileDataError, pymupdf.EmptyFileError) as exc:
+            print("Invalid shipment PDF:", repr(exc), flush=True)
             raise HTTPException(
                 status_code=400,
-                detail=f"Could not read {filename}: {exc}",
-            )
+                detail=f"Invalid or corrupted PDF: {filename}",
+            ) from exc
+
+        except pytesseract.TesseractNotFoundError as exc:
+            print("Shipment OCR unavailable:", repr(exc), flush=True)
+            raise HTTPException(
+                status_code=500,
+                detail="Tesseract OCR is not installed or configured",
+            ) from exc
+
+        except Exception as exc:
+            print("Shipment PDF processing error:", repr(exc), flush=True)
+            raise HTTPException(
+                status_code=500,
+                detail=f"PDF processing failed for {filename}",
+            ) from exc
 
     files = {
         "invoice": invoice_file,
@@ -508,27 +589,43 @@ async def upload_and_verify_shipment(
                     f"Gemini API error for {document_type}: {exc}",
                     flush=True,
                 )
+
+                if exc.code == 429:
+                    raise HTTPException(
+                        status_code=429,
+                        detail=(
+                            f"Gemini rate limit or quota reached "
+                            f"while processing {document_type}. "
+                            "Please try again later."
+                        ),
+                    ) from exc
+
+                if exc.code == 503:
+                    raise HTTPException(
+                        status_code=503,
+                        detail=(
+                            f"Gemini is temporarily unavailable "
+                            f"while processing {document_type}. "
+                            "Please try again later."
+                        ),
+                    ) from exc
+
                 raise HTTPException(
                     status_code=502,
-                    detail=(
-                        f"Gemini extraction failed for "
-                        f"{document_type}: {exc.code}"
-                    ),
-                )
-
+                    detail=f"Gemini API extraction failed for {document_type}.",
+                ) from exc
             except Exception as exc:
                 print(
-                    f"Extraction error for {document_type}: {exc!r}",
+                    f"Unexpected extraction error for {document_type}: {exc!r}",
                     flush=True,
                 )
                 raise HTTPException(
-                    status_code=502,
+                    status_code=500,
                     detail=(
-                        f"Extraction failed for {document_type}. "
-                        "Check the backend logs."
+                        f"An unexpected extraction error occurred "
+                        f"while processing {document_type}."
                     ),
-                )
-
+                ) from exc
             extracted_data = result.model_dump(mode="json")
 
             # Save successful Gemini extraction
