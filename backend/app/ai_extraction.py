@@ -1,4 +1,3 @@
-
 import os
 import time
 from typing import Optional
@@ -6,8 +5,10 @@ from typing import Optional
 from google import genai
 from google.genai import types, errors
 from pydantic import BaseModel, Field
+from pathlib import Path
+from dotenv import load_dotenv
 
-
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 # =====================================
 # INVOICE EXTRACTION
 # =====================================

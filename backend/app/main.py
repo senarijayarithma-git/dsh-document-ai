@@ -11,6 +11,12 @@ from pydantic import BaseModel
 from .schemas import Invoice, PackingList, AirWaybill
 from .validation import validate_shipment
 
+from fastapi import Depends
+from sqlalchemy.orm import Session
+from sqlalchemy.exc import SQLAlchemyError
+
+from app.database import get_db
+from app.db_models import Document
 
 from .adapter import (
     convert_invoice,
@@ -188,12 +194,12 @@ def extract_structured(
             status_code=500,
             detail="An unexpected extraction error occurred."
         ) from exc
-
-
+    
 @app.post("/documents/upload-and-extract")
 async def upload_and_extract(
     file: UploadFile = File(...),
-    document_type: str = "invoice"
+    document_type: str = "invoice",
+    db: Session = Depends(get_db),
 ):
     # Only supported document types
     if document_type not in DOCUMENT_SCHEMAS:
@@ -365,6 +371,23 @@ async def upload_and_extract(
         extraction_source = "gemini_live"
         from_cache = False
 
+
+    # Save metadata after successful extraction
+    document_record = Document(
+        filename=file.filename or "unnamed.pdf",
+        document_type=document_type,
+        status="processed",
+    )
+
+    try:
+        db.add(document_record)
+        db.commit()
+    except SQLAlchemyError:
+        db.rollback()
+        raise HTTPException(
+            status_code=503,
+            detail="Document processing succeeded, but database storage failed.",
+        )
 
     return {
         "filename": file.filename,
