@@ -699,3 +699,56 @@ async def upload_and_verify_shipment(
             "findings": report["findings"],
             "report": report,
         }
+        return {
+            "message": "Shipment verification completed",
+            "documents": {
+                key: {
+                    "filename": files[key].filename,
+                    "from_cache": extraction_sources[key]["from_cache"],
+                    "extraction_source": extraction_sources[key]["extraction_source"],
+                    "extracted_data": extracted[key],
+                }
+                for key in files
+            },
+            "summary": {
+                "total_checks": report["total_checks"],
+                **report["summary"],
+            },
+            "findings": report["findings"],
+            "report": report,
+        }
+
+@app.get("/documents")
+def get_documents(db: Session = Depends(get_db)):
+    documents = db.query(Document).order_by(Document.id).all()
+
+    return [
+        {
+            "id": document.id,
+            "filename": document.filename,
+            "document_type": document.document_type,
+            "status": document.status,
+            "uploaded_at": document.uploaded_at.isoformat(),
+        }
+        for document in documents
+    ]
+@app.get("/documents/{document_id}")
+def get_document_by_id(
+    document_id: int,
+    db: Session = Depends(get_db),
+):
+    document = db.get(Document, document_id)
+
+    if document is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Document not found",
+        )
+
+    return {
+        "id": document.id,
+        "filename": document.filename,
+        "document_type": document.document_type,
+        "status": document.status,
+        "uploaded_at": document.uploaded_at.isoformat(),
+    }
