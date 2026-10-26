@@ -38,6 +38,9 @@ from .cache import (
 from .report import build_verification_report
 from .ai_chat import answer_document_question
 
+import logging
+logger = logging.getLogger(__name__)
+
 app = FastAPI(title='DSH Document AI - Local Prototype')
 
 class ValidationRequest(BaseModel):
@@ -778,10 +781,21 @@ def ask_document_question(
         )
 
         # Step 3: Ask Gemini to answer the user's question
-    answer = answer_document_question(
-        extracted_data=document.extracted_data,
-        question=request.question,
-    )
+    try:
+        answer = answer_document_question(
+            extracted_data=document.extracted_data,
+            question=request.question,
+        )
+
+    except Exception:
+        logger.exception("AI chatbot request failed")
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "AI chatbot service is temporarily unavailable. "
+                "Please try again later."
+            ),
+        )
 
     # Step 4: Return Gemini's answer
     return {
