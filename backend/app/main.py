@@ -8,7 +8,7 @@ from .ai_extraction import (
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from google.genai import errors
 from pydantic import BaseModel
-from .schemas import Invoice, PackingList, AirWaybill
+from .schemas import Invoice, PackingList, AirWaybill, ChatRequest
 from .validation import validate_shipment
 
 from fastapi import Depends
@@ -36,6 +36,7 @@ from .cache import (
 )
 
 from .report import build_verification_report
+from .ai_chat import answer_document_question
 
 app = FastAPI(title='DSH Document AI - Local Prototype')
 
@@ -753,4 +754,38 @@ def get_document_by_id(
         "status": document.status,
         "uploaded_at": document.uploaded_at.isoformat(),
         "extracted_data": document.extracted_data,
+    }
+
+@app.post("/chat/ask")
+def ask_document_question(
+    request: ChatRequest,
+    db: Session = Depends(get_db),
+):
+    # Step 1: Find the document in PostgreSQL
+    document = db.get(Document, request.document_id)
+
+    if document is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Document not found",
+        )
+
+    # Step 2: Check whether extracted data exists
+    if document.extracted_data is None:
+        raise HTTPException(
+            status_code=400,
+            detail="This document has no extracted data",
+        )
+
+        # Step 3: Ask Gemini to answer the user's question
+    answer = answer_document_question(
+        extracted_data=document.extracted_data,
+        question=request.question,
+    )
+
+    # Step 4: Return Gemini's answer
+    return {
+        "document_id": document.id,
+        "question": request.question,
+        "answer": answer,
     }

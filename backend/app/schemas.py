@@ -87,3 +87,7 @@ class Finding(BaseModel):
     status: Literal['PASS', 'REVIEW', 'FAIL', 'NOT_VERIFIED']
     message: str
     evidence: list[Evidence] = Field(default_factory=list)
+
+class ChatRequest(BaseModel):
+    document_id: int = Field(gt=0)
+    question: str = Field(min_length=1, max_length=2000)
