@@ -1,7 +1,6 @@
-
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, Integer, String
+from sqlalchemy import DateTime, Integer, String, JSON
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -36,4 +35,9 @@ class Document(Base):
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
         nullable=False
+    )
+
+    extracted_data: Mapped[dict | None] = mapped_column(
+        JSON,
+        nullable=True
     )

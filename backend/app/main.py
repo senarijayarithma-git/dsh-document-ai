@@ -372,12 +372,13 @@ async def upload_and_extract(
         from_cache = False
 
 
-    # Save metadata after successful extraction
+    # Save metadata and extracted data after successful extraction
     document_record = Document(
-        filename=file.filename or "unnamed.pdf",
-        document_type=document_type,
-        status="processed",
-    )
+    filename=file.filename or "unnamed.pdf",
+    document_type=document_type,
+    status="processed",
+    extracted_data=extracted_data,
+)
 
     try:
         db.add(document_record)
@@ -751,4 +752,5 @@ def get_document_by_id(
         "document_type": document.document_type,
         "status": document.status,
         "uploaded_at": document.uploaded_at.isoformat(),
+        "extracted_data": document.extracted_data,
     }

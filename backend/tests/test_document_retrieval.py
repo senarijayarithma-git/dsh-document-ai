@@ -26,6 +26,11 @@ def test_document_retrieval():
                 document_type="invoice",
                 status="processed",
                 uploaded_at=datetime.now(timezone.utc),
+                extracted_data={
+                    "invoice_number": "TEST-001",
+                    "currency": "USD",
+                    "total_amount": 1500.00,
+                },
             )
         )
         db.commit()
@@ -50,7 +55,10 @@ def test_document_retrieval():
 
             assert response.status_code == 200
             assert response.json()["status"] == "processed"
-
+            assert response.json()["extracted_data"]["invoice_number"] == "TEST-001"
+            assert response.json()["extracted_data"]["currency"] == "USD"
+            assert response.json()["extracted_data"]["total_amount"] == 1500.00
+            
             # Test 3: Retrieve a missing document
             response = client.get("/documents/999")
 
