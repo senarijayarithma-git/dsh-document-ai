@@ -11,24 +11,24 @@ from sqlalchemy.engine import URL
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 
-def load_database_url():
-    env_file = BASE_DIR / ".env"
 
-    if not env_file.exists():
-        raise RuntimeError("Missing backend/.env file")
+from dotenv import load_dotenv
 
-    # Read the DATABASE_URL setting
-    for line in env_file.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
+# Load local configuration without overriding
+# environment variables supplied by the test runner
+# or production deployment.
+load_dotenv(
+    dotenv_path=BASE_DIR / ".env",
+    override=False,
+)
 
-        if line.startswith("DATABASE_URL="):
-            return line.split("=", 1)[1].strip()
+DATABASE_URL = os.getenv("DATABASE_URL")
 
-    raise RuntimeError("DATABASE_URL not found in .env")
-
-
-DATABASE_URL = os.getenv("DATABASE_URL") or load_database_url()
-
+if not DATABASE_URL:
+    raise RuntimeError(
+        "DATABASE_URL is missing. Configure it in the "
+        "environment or backend/.env."
+    )
 
 # Create the SQLAlchemy database engine
 engine = create_engine(

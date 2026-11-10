@@ -1,12 +1,14 @@
+import pytest
 from fastapi.testclient import TestClient
 from app.main import app
 from unittest.mock import MagicMock, patch
 from app.main import get_db
 
-client = TestClient(app)
+@pytest.fixture
+def client(legacy_authenticated_client):
+    return legacy_authenticated_client
 
-
-def test_chat_rejects_invalid_document_id():
+def test_chat_rejects_invalid_document_id(client):
     response = client.post(
         "/chat/ask",
         json={
@@ -17,7 +19,7 @@ def test_chat_rejects_invalid_document_id():
 
     assert response.status_code == 422
 
-def test_chat_document_not_found():
+def test_chat_document_not_found(client):
     fake_db = MagicMock()
     fake_db.get.return_value = None
 
@@ -43,7 +45,7 @@ def test_chat_document_not_found():
     finally:
         app.dependency_overrides.pop(get_db, None)
 
-def test_chat_document_without_extracted_data():
+def test_chat_document_without_extracted_data(client):
     fake_document = MagicMock()
     fake_document.extracted_data = None
 
@@ -72,7 +74,7 @@ def test_chat_document_without_extracted_data():
     finally:
         app.dependency_overrides.pop(get_db, None)
 
-def test_chat_successful_response():
+def test_chat_successful_response(client):
     fake_document = MagicMock()
     fake_document.id = 3
     fake_document.extracted_data = {
@@ -117,7 +119,7 @@ def test_chat_successful_response():
     finally:
         app.dependency_overrides.pop(get_db, None)
 
-def test_chat_gemini_service_failure():
+def test_chat_gemini_service_failure(client):
     fake_document = MagicMock()
     fake_document.id = 3
     fake_document.extracted_data = {

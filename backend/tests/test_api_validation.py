@@ -1,12 +1,14 @@
-
+import pytest
 from fastapi.testclient import TestClient
 from app.main import app
 
 
-client = TestClient(app)
+@pytest.fixture
+def client(legacy_authenticated_client):
+    return legacy_authenticated_client
 
 
-def test_shipment_validation_endpoint():
+def test_shipment_validation_endpoint(client):
     shipment_data = {
         "invoice": {
             "invoice_number": "INV-001",
@@ -50,8 +52,8 @@ def test_shipment_validation_endpoint():
     assert "findings" in response.json()
     assert isinstance(response.json()["findings"], list)
 
-    
-def test_shipment_weight_mismatch_api():
+
+def test_shipment_weight_mismatch_api(client):
     shipment_data = {
         "invoice": {
             "invoice_number": "EXPBLRDX09102602",
@@ -89,7 +91,7 @@ def test_shipment_weight_mismatch_api():
     assert findings["REG-001"]["status"] == "NOT_VERIFIED"
 
 
-def test_shipment_validation_missing_air_waybill():
+def test_shipment_validation_missing_air_waybill(client):
     shipment_data = {
         "invoice": {
             "invoice_number": "INV-001",
@@ -116,36 +118,7 @@ def test_shipment_validation_missing_air_waybill():
         for error in errors
     )
 
-def test_shipment_validation_invalid_package_count():
-    shipment_data = {
-        "invoice": {
-            "invoice_number": "INV-001"
-        },
-        "packing_list": {
-            "invoice_number": "INV-001",
-            "package_count": "ten"
-        },
-        "air_waybill": {
-            "awb_number": "123-45678901",
-            "package_count": 10
-        }
-    }
-
-    response = client.post(
-        "/shipments/validate",
-        json=shipment_data
-    )
-
-    assert response.status_code == 422
-
-    errors = response.json()["detail"]
-
-    assert any(
-        error["loc"] == ["body", "packing_list", "package_count"]
-        for error in errors
-    )
-
-def test_shipment_validation_invalid_package_count():
+def test_shipment_validation_invalid_package_count(client):
     shipment_data = {
         "invoice": {
             "invoice_number": "INV-001"

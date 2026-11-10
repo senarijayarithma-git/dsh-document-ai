@@ -10,7 +10,7 @@ from app.db_models import Document
 from app.main import app
 
 
-def test_document_retrieval():
+def test_document_retrieval(legacy_authenticated_client):
     test_engine = create_engine(
         "sqlite://",
         connect_args={"check_same_thread": False},
@@ -42,7 +42,8 @@ def test_document_retrieval():
     app.dependency_overrides[get_db] = override_get_db
 
     try:
-        with TestClient(app) as client:
+        client = legacy_authenticated_client
+        if True:
             # Test 1: Retrieve all documents
             response = client.get("/documents")
 

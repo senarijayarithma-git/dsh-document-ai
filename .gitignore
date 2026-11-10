@@ -39,3 +39,14 @@ build/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Private NMRA certificates and attachments
+/backend/storage/
+
+# Local Excel reference files
+/backend/data/*.xlsx
+
+backend/.env.migration
+# Alembic temporary backups
+backend/alembic/**/*.bak
+backend/alembic/**/*.pre_fix_backup

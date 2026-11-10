@@ -84,3 +84,6 @@ for document_type, document in documents.items():
     print(f"Cache prepared: {filename}")
 
 print("Finished preparing test caches!")
+class ChatRequest(BaseModel):
+    document_id: int = Field(gt=0)
+    question: str = Field(min_length=1, max_length=2000)

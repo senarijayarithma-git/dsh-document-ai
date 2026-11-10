@@ -15,6 +15,19 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 class InvoiceItem(BaseModel):
     product: str
+
+    # Supplier's material/product number
+    material_code: Optional[str] = None
+
+    # Item/catalogue code used for NMRA matching
+    item_code: Optional[str] = None
+
+    # Description exactly as shown on the invoice
+    description: Optional[str] = None
+
+    # Page where the item appears in the invoice
+    invoice_page: Optional[int] = None
+
     quantity: Optional[float] = None
     unit_price: Optional[float] = None
     amount: Optional[float] = None
@@ -136,6 +149,24 @@ For invoices:
 - Extract invoice number, date, exporter, consignee,
   currency, products, quantities, prices, freight,
   and total amount.
+- Extract every invoice line item separately.
+- Do not combine repeated invoice lines.
+- For each item, extract the following fields:
+  - product: product description as printed.
+  - description: product description as printed.
+  - material_code: supplier's material code, if present.
+  - item_code: catalogue/item code used to identify
+    the product, if present.
+  - invoice_page: page number where the item appears,
+    only if it can be determined reliably.
+  - quantity, unit_price, and amount.
+- Material codes and item/catalogue codes are different.
+  Do not confuse them.
+- Preserve item codes exactly as printed, including
+  letters and leading zeros.
+- Never invent an item code or infer one from the
+  product description.
+- If a code is missing or ambiguous, use null.
 - Do not assume freight is included in the total.
 - Preserve the total as stated in the document.
 

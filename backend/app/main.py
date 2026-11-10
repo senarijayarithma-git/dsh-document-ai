@@ -38,10 +38,41 @@ from .cache import (
 from .report import build_verification_report
 from .ai_chat import answer_document_question
 
+from app.nmra_review import router as nmra_review_router
+
 import logging
 logger = logging.getLogger(__name__)
+from fastapi.middleware.cors import CORSMiddleware
+
+from app.auth_routes import router as auth_router
+from app.auth_dependencies import get_current_employee
 
 app = FastAPI(title='DSH Document AI - Local Prototype')
+
+
+import os
+
+DEFAULT_CORS_ORIGINS = (
+    "http://localhost:5173,"
+    "http://127.0.0.1:5173"
+)
+
+cors_origins = [
+    origin.strip().rstrip("/")
+    for origin in os.getenv(
+        "CORS_ORIGINS",
+        DEFAULT_CORS_ORIGINS,
+    ).split(",")
+    if origin.strip()
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=cors_origins,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
+)
 
 class ValidationRequest(BaseModel):
     invoice: Invoice
@@ -52,8 +83,7 @@ class ValidationRequest(BaseModel):
 def health():
     return {'status': 'ok'}
 
-
-@app.post("/documents/extract-text")
+@app.post("/documents/extract-text", dependencies=[Depends(get_current_employee)])
 async def extract_text(file: UploadFile = File(...)):
     data = await file.read(10 * 1024 * 1024 + 1)
 
@@ -125,7 +155,8 @@ async def extract_text(file: UploadFile = File(...)):
         )
     }
 
-@app.post('/shipments/validate')
+
+@app.post("/shipments/validate", dependencies=[Depends(get_current_employee)])
 def validate(payload: ValidationRequest):
     return {'findings': [f.model_dump(mode='json') for f in validate_shipment(payload.invoice, payload.packing_list, payload.air_waybill)]}
 
@@ -134,9 +165,7 @@ class StructuredExtractionRequest(BaseModel):
     document_type: str
     text: str
 
-
-
-@app.post("/documents/extract-structured")
+@app.post("/documents/extract-structured", dependencies=[Depends(get_current_employee)])
 def extract_structured(
     payload: StructuredExtractionRequest
 ):
@@ -204,6 +233,7 @@ async def upload_and_extract(
     file: UploadFile = File(...),
     document_type: str = "invoice",
     db: Session = Depends(get_db),
+    _employee = Depends(get_current_employee),
 ):
     # Only supported document types
     if document_type not in DOCUMENT_SCHEMAS:
@@ -414,8 +444,7 @@ class ExtractedShipmentRequest(BaseModel):
     packing_list: dict
     air_waybill: dict
 
-
-@app.post("/shipments/verify-extracted")
+@app.post("/shipments/verify-extracted", dependencies=[Depends(get_current_employee)])
 def verify_extracted_shipment(
     request: ExtractedShipmentRequest,
 ):
@@ -460,7 +489,7 @@ def verify_extracted_shipment(
 # AUTOMATIC SHIPMENT VERIFICATION
 # =====================================
 
-@app.post("/shipments/upload-and-verify")
+@app.post("/shipments/upload-and-verify", dependencies=[Depends(get_current_employee)])
 async def upload_and_verify_shipment(
     invoice_file: UploadFile = File(...),
     packing_list_file: UploadFile = File(...),
@@ -723,7 +752,8 @@ async def upload_and_verify_shipment(
             "report": report,
         }
 
-@app.get("/documents")
+
+@app.get("/documents", dependencies=[Depends(get_current_employee)])
 def get_documents(db: Session = Depends(get_db)):
     documents = db.query(Document).order_by(Document.id).all()
 
@@ -737,7 +767,8 @@ def get_documents(db: Session = Depends(get_db)):
         }
         for document in documents
     ]
-@app.get("/documents/{document_id}")
+
+@app.get("/documents/{document_id}", dependencies=[Depends(get_current_employee)])
 def get_document_by_id(
     document_id: int,
     db: Session = Depends(get_db),
@@ -759,7 +790,8 @@ def get_document_by_id(
         "extracted_data": document.extracted_data,
     }
 
-@app.post("/chat/ask")
+
+@app.post("/chat/ask", dependencies=[Depends(get_current_employee)])
 def ask_document_question(
     request: ChatRequest,
     db: Session = Depends(get_db),
@@ -803,3 +835,6 @@ def ask_document_question(
         "question": request.question,
         "answer": answer,
     }
+
+app.include_router(auth_router)
+app.include_router(nmra_review_router)

@@ -1,13 +1,15 @@
-
+import pytest
 import pymupdf
 from fastapi.testclient import TestClient
 from app.main import app
 
 
-client = TestClient(app)
+@pytest.fixture
+def client(legacy_authenticated_client):
+    return legacy_authenticated_client
 
 
-def test_extract_text_valid_pdf():
+def test_extract_text_valid_pdf(client):
     # Create a small PDF in memory
     pdf = pymupdf.open()
     page = pdf.new_page()
@@ -56,7 +58,7 @@ def test_extract_text_valid_pdf():
     assert data["needs_ocr"] is False
 
 
-def test_extract_text_rejects_non_pdf():
+def test_extract_text_rejects_non_pdf(client):
     response = client.post(
         "/documents/extract-text",
         files={
@@ -72,7 +74,7 @@ def test_extract_text_rejects_non_pdf():
 
     assert response.json()["detail"] == "Expected a PDF"
 
-def test_extract_text_rejects_oversized_pdf():
+def test_extract_text_rejects_oversized_pdf(client):
     # Create fake PDF bytes larger than 10 MB.
     # A complete PDF is unnecessary because the size
     # check happens before PDF processing.
@@ -99,7 +101,7 @@ def test_extract_text_rejects_oversized_pdf():
         == "File exceeds 10 MB limit"
     )
 
-def test_extract_text_rejects_too_many_pages():
+def test_extract_text_rejects_too_many_pages(client):
     # Create a PDF containing 31 blank pages
     pdf = pymupdf.open()
 
@@ -129,7 +131,7 @@ def test_extract_text_rejects_too_many_pages():
         == "More than 30 pages"
     )
 
-def test_extract_text_missing_file():
+def test_extract_text_missing_file(client):
     # Send a request without attaching a file
     response = client.post(
         "/documents/extract-text"
