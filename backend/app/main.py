@@ -50,21 +50,9 @@ from app.auth_dependencies import get_current_employee
 app = FastAPI(title='DSH Document AI - Local Prototype')
 
 
-import os
+from app.deployment_config import get_cors_origins
 
-DEFAULT_CORS_ORIGINS = (
-    "http://localhost:5173,"
-    "http://127.0.0.1:5173"
-)
-
-cors_origins = [
-    origin.strip().rstrip("/")
-    for origin in os.getenv(
-        "CORS_ORIGINS",
-        DEFAULT_CORS_ORIGINS,
-    ).split(",")
-    if origin.strip()
-]
+cors_origins = get_cors_origins()
 
 app.add_middleware(
     CORSMiddleware,

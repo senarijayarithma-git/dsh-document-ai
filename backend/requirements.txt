@@ -13,4 +13,5 @@ pytesseract
 Pillow
 python-dotenv>=1.0
 alembic>=1.20,<2
-
+PyJWT>=2.15,<3
+pwdlib[argon2]>=0.3,<1

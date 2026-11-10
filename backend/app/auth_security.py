@@ -1,8 +1,8 @@
 import os
+from pathlib import Path
 from datetime import datetime, timedelta, timezone
 
 import jwt
-from dotenv import load_dotenv
 
 from pwdlib import PasswordHash
 
@@ -22,7 +22,12 @@ def verify_password(
         hashed_password,
     )
 
-load_dotenv()
+from dotenv import load_dotenv
+
+load_dotenv(
+    dotenv_path=Path(__file__).resolve().parent.parent / ".env",
+    override=False,
+)
 
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRY_MINUTES = 30
@@ -35,6 +40,25 @@ def get_jwt_secret() -> str:
         raise RuntimeError(
             "JWT_SECRET_KEY is missing or too short."
         )
+
+    app_env = os.getenv(
+        "APP_ENV", "development"
+    ).strip().lower()
+
+    if app_env == "production":
+        lowered = secret.lower()
+
+        if (
+            "replace" in lowered
+            or "your_secret" in lowered
+            or "changeme" in lowered
+            or "example" in lowered
+            or len(set(secret)) < 12
+        ):
+            raise RuntimeError(
+                "Production JWT_SECRET_KEY appears to be "
+                "a placeholder or weak secret."
+            )
 
     return secret
 
