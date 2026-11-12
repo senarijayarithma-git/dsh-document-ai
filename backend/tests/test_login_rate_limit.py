@@ -98,3 +98,62 @@ def test_concurrent_requests_respect_limit(monkeypatch):
 
     assert results.count(200) == 3
     assert results.count(429) == 5
+
+
+def test_limiter_bounds_tracked_clients(monkeypatch):
+    monkeypatch.setenv("LOGIN_RATE_LIMIT_ATTEMPTS", "3")
+    monkeypatch.setenv("LOGIN_RATE_LIMIT_WINDOW_SECONDS", "60")
+    monkeypatch.setenv("LOGIN_RATE_LIMIT_MAX_CLIENTS", "2")
+
+    for ip in (
+        "192.0.2.10",
+        "192.0.2.11",
+    ):
+        login_rate_limit.check_login_rate_limit(
+            make_request(ip)
+        )
+
+    with pytest.raises(HTTPException) as error:
+        login_rate_limit.check_login_rate_limit(
+            make_request("192.0.2.12")
+        )
+
+    assert error.value.status_code == 429
+    assert int(error.value.headers["Retry-After"]) > 0
+    assert len(login_rate_limit._attempts) == 2
+
+
+def test_expired_clients_free_capacity(monkeypatch):
+    monkeypatch.setenv("LOGIN_RATE_LIMIT_ATTEMPTS", "2")
+    monkeypatch.setenv("LOGIN_RATE_LIMIT_WINDOW_SECONDS", "10")
+    monkeypatch.setenv("LOGIN_RATE_LIMIT_MAX_CLIENTS", "2")
+
+    clock = [100.0]
+    monkeypatch.setattr(
+        login_rate_limit.time,
+        "monotonic",
+        lambda: clock[0],
+    )
+
+    login_rate_limit.check_login_rate_limit(
+        make_request("192.0.2.10")
+    )
+    login_rate_limit.check_login_rate_limit(
+        make_request("192.0.2.11")
+    )
+
+    with pytest.raises(HTTPException) as error:
+        login_rate_limit.check_login_rate_limit(
+            make_request("192.0.2.12")
+        )
+
+    assert error.value.status_code == 429
+
+    clock[0] = 111.0
+
+    login_rate_limit.check_login_rate_limit(
+        make_request("192.0.2.12")
+    )
+
+    assert len(login_rate_limit._attempts) <= 2
+    assert "192.0.2.12" in login_rate_limit._attempts

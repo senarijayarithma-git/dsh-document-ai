@@ -66,6 +66,7 @@ per-client-IP request limiter.
 
 - `LOGIN_RATE_LIMIT_ATTEMPTS=5`
 - `LOGIN_RATE_LIMIT_WINDOW_SECONDS=60`
+- `LOGIN_RATE_LIMIT_MAX_CLIENTS=10000`
 
 When the limit is exceeded, the endpoint returns HTTP 429
 with a `Retry-After` header.
