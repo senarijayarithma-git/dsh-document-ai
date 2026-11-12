@@ -15,6 +15,7 @@ from app.auth_security import (
     verify_password,
 )
 from app.auth_dependencies import get_current_employee
+from app.login_rate_limit import check_login_rate_limit
 
 
 router = APIRouter(
@@ -30,6 +31,7 @@ router = APIRouter(
 def employee_login(
     request: EmployeeLoginRequest,
     db: Session = Depends(get_db),
+    _: None = Depends(check_login_rate_limit),
 ):
     email = str(request.email).strip().lower()
 

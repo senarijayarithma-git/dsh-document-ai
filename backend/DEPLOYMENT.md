@@ -1,4 +1,4 @@
-﻿# DSH Document AI: Deployment Guide
+# DSH Document AI: Deployment Guide
 
 ## Required environment variables
 
@@ -58,3 +58,22 @@ production database.
 This guide does not itself configure HTTPS, rate limiting,
 monitoring, backups, or production database migration authorization.
 These must be addressed before public deployment.
+
+## Login rate limiting
+
+The `/auth/login` endpoint has a configurable, in-memory,
+per-client-IP request limiter.
+
+- `LOGIN_RATE_LIMIT_ATTEMPTS=5`
+- `LOGIN_RATE_LIMIT_WINDOW_SECONDS=60`
+
+When the limit is exceeded, the endpoint returns HTTP 429
+with a `Retry-After` header.
+
+This implementation is suitable for local and single-process use.
+Counters are not shared between multiple application workers
+or servers and reset when the process restarts.
+
+Before public deployment, use a shared rate limiter or
+trusted gateway-level protection. Review trusted proxy handling,
+memory limits, shared-IP behavior, and monitoring.
