@@ -23,13 +23,31 @@ python -m pip install -r requirements.txt
 For a Linux deployment environment:
 
 ```bash
-python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --proxy-headers --forwarded-allow-ips 127.0.0.1
 ```
 
 Run behind an HTTPS-enabled reverse proxy or a hosting platform
 that provides TLS termination.
 
 Do not use `--reload` in production.
+
+## Trusted reverse proxy configuration
+
+The startup example assumes the HTTPS reverse proxy connects to
+Uvicorn from `127.0.0.1` on the same machine.
+
+- Bind Uvicorn to loopback so external clients cannot bypass the proxy.
+- Accept forwarded headers only from the explicitly trusted proxy.
+- Never configure `--forwarded-allow-ips '*'` for an untrusted network.
+- Ensure the reverse proxy replaces incoming client-supplied
+  forwarding headers with validated values.
+- For containers or separate proxy hosts, determine the actual
+  proxy address and configure network access restrictions before
+  changing the startup command.
+- Verify the client IP behavior in the real deployment environment.
+
+The login limiter uses `request.client.host`. Its accuracy depends
+on the trusted proxy configuration.
 
 ## Database migrations
 
