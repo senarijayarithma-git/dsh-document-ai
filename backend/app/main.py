@@ -563,32 +563,43 @@ async def upload_and_verify_shipment(
         "packing_list": packing_list_file,
         "air_waybill": air_waybill_file,
     }
-
-    extracted = {}
-    extraction_sources = {}
+    # Validate all shipment uploads before PDF processing.
+    validated_files = {}
 
     for document_type, uploaded_file in files.items():
-
         if uploaded_file.content_type != "application/pdf":
             raise HTTPException(
                 status_code=400,
                 detail=f"{document_type} must be a PDF",
             )
 
-        file_bytes = await uploaded_file.read()
+        file_bytes = await uploaded_file.read(MAX_FILE_SIZE + 1)
+
+        if len(file_bytes) > MAX_FILE_SIZE:
+            raise HTTPException(
+                status_code=413,
+                detail=f"{document_type} exceeds 10 MB limit",
+            )
+
+        validated_files[document_type] = file_bytes
+
+    # All three files have passed validation.
+    extracted = {}
+    extraction_sources = {}
+
+    for document_type, uploaded_file in files.items():
+        file_bytes = validated_files[document_type]
 
         document_text = read_pdf(
             file_bytes,
             uploaded_file.filename or document_type,
         )
-
         if not document_text.strip():
             raise HTTPException(
                 status_code=422,
                 detail=f"No readable text in {document_type}",
             )
 
-        
         # Generate cache key from PDF bytes
         cache_key = generate_cache_key(
             file_bytes,
