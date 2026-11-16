@@ -282,3 +282,65 @@ def test_upload_new_version_preserves_previous_documents(
         assert f"Certificate version {['one', 'two'][version.version - 1]}" in (
             pages[0].extracted_text
         )
+
+def test_viewer_cannot_upload_nmra_documents(
+    client,
+    make_employee,
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("NMRA_STORAGE_DIR", str(tmp_path))
+
+    _, headers = make_employee("VIEWER")
+
+    d_number = f"TEST-{uuid4().hex}".upper()
+
+    response = client.post(
+        "/nmra/upload",
+        data={"d_number": d_number},
+        files=[
+            (
+                "certificate",
+                (
+                    "certificate.pdf",
+                    make_pdf("Viewer must not upload"),
+                    "application/pdf",
+                ),
+            )
+        ],
+        headers=headers,
+    )
+
+    assert response.status_code == 403
+    assert list(tmp_path.iterdir()) == []
+
+def test_reviewer_can_upload_nmra_documents(
+    client,
+    make_employee,
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("NMRA_STORAGE_DIR", str(tmp_path))
+
+    _, headers = make_employee("REVIEWER")
+    d_number = f"TEST-{uuid4().hex}".upper()
+
+    response = client.post(
+        "/nmra/upload",
+        data={"d_number": d_number},
+        files=[
+            (
+                "certificate",
+                (
+                    "certificate.pdf",
+                    make_pdf("Reviewer upload test"),
+                    "application/pdf",
+                ),
+            )
+        ],
+        headers=headers,
+    )
+
+    assert response.status_code == 201, response.text
+    assert response.json()["d_number"] == d_number
+    assert response.json()["version"] == 1

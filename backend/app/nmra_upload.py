@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from app.auth_dependencies import get_current_employee
+from app.auth_dependencies import require_nmra_reviewer
 from app.database import get_db
 from app.nmra_models import (
     NMRAAttachment,
@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(
     prefix="/nmra",
     tags=["NMRA Upload"],
-    dependencies=[Depends(get_current_employee)],
+    dependencies=[Depends(require_nmra_reviewer)],
 )
 
 MAX_ATTACHMENTS = 10
