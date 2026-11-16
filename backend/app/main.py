@@ -14,7 +14,6 @@ from .validation import validate_shipment
 from fastapi import Depends
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
-
 from app.database import get_db
 from app.db_models import Document
 from .adapter import (
@@ -44,6 +43,7 @@ logger = logging.getLogger(__name__)
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.auth_routes import router as auth_router
+from app.nmra_documents import router as nmra_documents_router
 from app.auth_dependencies import get_current_employee
 from app.request_size_limit import ShipmentRequestSizeLimitMiddleware
 
@@ -847,3 +847,4 @@ def ask_document_question(
 app.include_router(auth_router)
 app.include_router(nmra_review_router)
 app.include_router(nmra_upload_router)
+app.include_router(nmra_documents_router)
