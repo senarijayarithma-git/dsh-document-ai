@@ -3,6 +3,17 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
 from datetime import date, datetime, timezone
+from sqlalchemy import CheckConstraint
+from sqlalchemy import (
+    Column,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
+from sqlalchemy.orm import relationship
 
 class NMRARegistration(Base):
     __tablename__ = "nmra_registrations"
@@ -104,7 +115,12 @@ class NMRAAttachment(Base):
         ForeignKey("nmra_registrations.id"),
         nullable=False
     )
-
+    certificate_version_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("nmra_certificate_versions.id"),
+        nullable=True,
+        index=True,
+    )
     filename: Mapped[str] = mapped_column(
         String(500),
         nullable=False
@@ -274,4 +290,103 @@ class EmployeeUser(Base):
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
         nullable=False,
+    )
+
+class NMRACertificateVersion(Base):
+    __tablename__ = "nmra_certificate_versions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+
+    registration_id = Column(
+        Integer,
+        ForeignKey("nmra_registrations.id"),
+        nullable=False,
+        index=True,
+    )
+
+    version = Column(Integer, nullable=False)
+
+    filename = Column(String(500), nullable=False)
+
+    storage_key = Column(
+        String(1024),
+        nullable=False,
+        unique=True,
+    )
+
+    review_status = Column(
+        String(30),
+        nullable=False,
+        default="PENDING",
+    )
+
+    uploaded_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "registration_id",
+            "version",
+            name="uq_nmra_certificate_registration_version",
+        ),
+    )
+
+
+class NMRADocumentPage(Base):
+    __tablename__ = "nmra_document_pages"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+
+    certificate_version_id = Column(
+        Integer,
+        ForeignKey("nmra_certificate_versions.id"),
+        nullable=True,
+        index=True,
+    )
+
+    attachment_id = Column(
+        Integer,
+        ForeignKey("nmra_attachments.id"),
+        nullable=True,
+        index=True,
+    )
+
+    page_number = Column(Integer, nullable=False)
+
+    extracted_text = Column(Text, nullable=False)
+
+    extraction_method = Column(
+        String(30),
+        nullable=False,
+    )
+
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "certificate_version_id",
+            "page_number",
+            name="uq_nmra_certificate_page",
+        ),
+        UniqueConstraint(
+            "attachment_id",
+            "page_number",
+            name="uq_nmra_attachment_page",
+        ),
+        CheckConstraint(
+            "(certificate_version_id IS NOT NULL AND "
+            "attachment_id IS NULL) OR "
+            "(certificate_version_id IS NULL AND "
+            "attachment_id IS NOT NULL)",
+            name="ck_nmra_document_page_one_parent",
+        ),
+        CheckConstraint(
+            "page_number > 0",
+            name="ck_nmra_document_page_positive_number",
+        ),
     )

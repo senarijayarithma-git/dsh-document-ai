@@ -133,7 +133,9 @@ def run_migrations_online():
                 # Permit either a completely empty sandbox
                 # or a previously migrated sandbox.
                 allowed_tables = EXPECTED_TABLES | {
-                    "alembic_version"
+                    "alembic_version",
+                    "nmra_certificate_versions",
+                    "nmra_document_pages",
                 }
 
                 unexpected = existing_tables - allowed_tables

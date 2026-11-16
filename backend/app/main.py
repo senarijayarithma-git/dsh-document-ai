@@ -17,7 +17,6 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.database import get_db
 from app.db_models import Document
-
 from .adapter import (
     convert_invoice,
     convert_packing_list,
@@ -39,18 +38,21 @@ from .report import build_verification_report
 from .ai_chat import answer_document_question
 
 from app.nmra_review import router as nmra_review_router
-
+from app.nmra_upload import router as nmra_upload_router
 import logging
 logger = logging.getLogger(__name__)
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.auth_routes import router as auth_router
 from app.auth_dependencies import get_current_employee
+from app.request_size_limit import ShipmentRequestSizeLimitMiddleware
 
 app = FastAPI(title='DSH Document AI - Local Prototype')
-
+app.add_middleware(ShipmentRequestSizeLimitMiddleware)
 
 from app.deployment_config import get_cors_origins
+from app.ocr_config import configure_tesseract
+
 
 cors_origins = get_cors_origins()
 
@@ -81,9 +83,13 @@ async def extract_text(file: UploadFile = File(...)):
     if not data.startswith(b"%PDF-"):
         raise HTTPException(400, "Expected a PDF")
 
-    pytesseract.pytesseract.tesseract_cmd = (
-        r"C:\Program Files\Tesseract-OCR\tesseract.exe"
-    )
+    try:
+        configure_tesseract()
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="OCR service is unavailable.",
+        ) from exc
 
     pages = []
 
@@ -493,10 +499,13 @@ async def upload_and_verify_shipment(
 
     # Use the same OCR installation as your existing endpoint.
     # Adjust this path if Tesseract is installed elsewhere.
-    pytesseract.pytesseract.tesseract_cmd = (
-        r"C:\Program Files\Tesseract-OCR\tesseract.exe"
-    )
-
+    try:
+        configure_tesseract()
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="OCR service is unavailable.",
+        ) from exc
     def read_pdf(file_bytes, filename):
         if len(file_bytes) > MAX_FILE_SIZE:
             raise HTTPException(
@@ -837,3 +846,4 @@ def ask_document_question(
 
 app.include_router(auth_router)
 app.include_router(nmra_review_router)
+app.include_router(nmra_upload_router)
