@@ -22,6 +22,10 @@ from .adapter import (
     convert_air_waybill,
 )
 
+from app.nmra_matching import (
+    get_approved_nmra_item_records,
+    match_product_code_with_evidence,
+)
 import pymupdf
 import pytesseract
 from PIL import Image
@@ -441,6 +445,7 @@ class ExtractedShipmentRequest(BaseModel):
 @app.post("/shipments/verify-extracted", dependencies=[Depends(get_current_employee)])
 def verify_extracted_shipment(
     request: ExtractedShipmentRequest,
+    db: Session = Depends(get_db),
 ):
     invoice = convert_invoice(request.invoice)
 
@@ -461,7 +466,23 @@ def verify_extracted_shipment(
     )
 
 
+    # Internal NMRA document matching only.
+    # This does not establish official regulatory authorization.
+    approved_records = get_approved_nmra_item_records(db)
+
+    nmra_matches = [
+        {
+            "product_code": item.product_code,
+            **match_product_code_with_evidence(
+                item.product_code,
+                approved_records,
+            ),
+        }
+        for item in invoice.items
+    ]
+
     return {
+        "nmra_matches": nmra_matches,
         "total_checks": len(findings),
         "passed": sum(
             f.status == "PASS" for f in findings

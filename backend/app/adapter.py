@@ -20,7 +20,12 @@ def convert_invoice(data: dict) -> Invoice:
     for item in data.get("items", []):
         items.append(
             Item(
-                description=item["product"],
+                description=(
+                    item.get("product")
+                    or item.get("description")
+                    or ""
+                ),
+                product_code=item.get("product_code"),
                 quantity=to_decimal(item.get("quantity")),
                 unit_price=to_decimal(item.get("unit_price")),
                 amount=to_decimal(item.get("amount")),
