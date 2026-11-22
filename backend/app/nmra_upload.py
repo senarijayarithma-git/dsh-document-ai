@@ -1,4 +1,3 @@
-
 import logging
 from datetime import datetime, timezone
 from pathlib import PurePosixPath
@@ -13,6 +12,7 @@ from app.auth_dependencies import require_nmra_reviewer
 from app.database import get_db
 from app.nmra_models import (
     NMRAAttachment,
+    NMRAAttachmentItem,
     NMRACertificateVersion,
     NMRADocumentPage,
     NMRARegistration,
@@ -23,12 +23,13 @@ from app.nmra_pdf_service import (
     NMRAPDFLimitError,
     extract_nmra_pdf_pages,
 )
+from app.nmra_item_extraction import extract_attachment_items
 from app.nmra_storage import (
     NMRAStorageError,
     delete_private_pdf,
     save_private_pdf,
+    get_storage_root,
 )
-
 logger = logging.getLogger(__name__)
 
 router = APIRouter(
@@ -36,10 +37,7 @@ router = APIRouter(
     tags=["NMRA Upload"],
     dependencies=[Depends(require_nmra_reviewer)],
 )
-
 MAX_ATTACHMENTS = 10
-
-
 def safe_filename(filename: str | None) -> str:
     # Never use the supplied filename as a filesystem path.
     name = (filename or "document.pdf").replace("\\", "/")
@@ -53,10 +51,8 @@ def safe_filename(filename: str | None) -> str:
 
     return name
 
-
 async def prepare_pdf(upload: UploadFile):
     filename = safe_filename(upload.filename)
-
     if upload.content_type != "application/pdf":
         raise HTTPException(
             400,
@@ -70,7 +66,6 @@ async def prepare_pdf(upload: UploadFile):
             413,
             f"{filename}: PDF exceeds 10 MiB",
         )
-
     try:
         pages = extract_nmra_pdf_pages(data)
     except NMRAPDFLimitError as exc:
@@ -95,7 +90,6 @@ async def prepare_pdf(upload: UploadFile):
         "pages": pages,
     }
 
-
 def add_pages(
     db: Session,
     pages,
@@ -116,7 +110,6 @@ def add_pages(
                 created_at=now,
             )
         )
-
 
 @router.post("/upload", status_code=201)
 async def upload_nmra_documents(
@@ -227,12 +220,48 @@ async def upload_nmra_documents(
                 prepared["pages"],
                 attachment_id=attachment_record.id,
             )
+            # Automatically extract item candidates from the attachment.
+            # No candidate is approved automatically.
+            from pathlib import Path
 
+            storage_root = get_storage_root()
+            pdf_path = (storage_root / attachment_key).resolve()
+
+            if not pdf_path.is_relative_to(storage_root):
+                raise RuntimeError("Unsafe attachment storage path")
+
+            extracted_items = extract_attachment_items(pdf_path)
+            candidate_count = len(extracted_items)
+
+            extraction_status = (
+                "REVIEW_REQUIRED"
+                if candidate_count == 0
+                else "CANDIDATES_FOUND"
+            )
+
+            for item in extracted_items:
+                db.add(
+                    NMRAAttachmentItem(
+                        attachment_id=attachment_record.id,
+                        **{
+                            **item,
+                            "review_status": "UNREVIEWED",
+                        },
+                    )
+                )
             attachment_results.append(
                 {
                     "id": attachment_record.id,
                     "filename": prepared["filename"],
                     "pages": len(prepared["pages"]),
+                    "candidate_count": candidate_count,
+                    "extraction_status": extraction_status,
+                    "review_status": "PENDING",
+                    "review_message": (
+                        "No item codes detected. Manual review required."
+                        if candidate_count == 0
+                        else "OCR candidates require manual verification."
+                    ),
                 }
             )
 

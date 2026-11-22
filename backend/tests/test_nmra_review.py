@@ -353,3 +353,286 @@ def test_viewer_cannot_correct_existing_item(
 
     test_db.refresh(item)
     assert item.item_code == "ORIGINAL-001"
+
+@pytest.mark.parametrize("role", ["ADMIN", "REVIEWER"])
+def test_authorized_employee_can_verify_item(
+    client,
+    test_db,
+    make_employee,
+    nmra_test_item,
+    role,
+):
+    employee, headers = make_employee(role)
+    _, attachment, item = nmra_test_item
+
+    original_code = item.item_code
+    original_evidence = item.evidence_text
+    original_description = item.product_description
+
+    response = client.post(
+        f"/nmra/attachments/{attachment.id}/items/{item.id}/verify",
+        headers=headers,
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["review_status"] == "REVIEWED"
+    assert response.json()["reviewed_by_employee_id"] == employee.id
+
+    test_db.refresh(item)
+    test_db.refresh(attachment)
+
+    assert item.review_status == "REVIEWED"
+    assert item.item_code == original_code
+    assert item.evidence_text == original_evidence
+    assert item.product_description == original_description
+    assert attachment.review_status == "PENDING"
+
+    audits = test_db.scalars(
+        select(NMRAItemReviewAudit).where(
+            NMRAItemReviewAudit.item_id == item.id
+        )
+    ).all()
+
+    assert len(audits) == 1
+    assert audits[0].action == "VERIFY_ITEM"
+    assert audits[0].reviewed_by == str(employee.id)
+
+    previous = json.loads(audits[0].previous_values)
+    updated = json.loads(audits[0].new_values)
+
+    assert previous["review_status"] == "UNREVIEWED"
+    assert updated["review_status"] == "REVIEWED"
+    assert previous["item_code"] == updated["item_code"]
+
+
+def test_viewer_cannot_verify_item(
+    client,
+    test_db,
+    make_employee,
+    nmra_test_item,
+):
+    _, headers = make_employee("VIEWER")
+    _, attachment, item = nmra_test_item
+
+    response = client.post(
+        f"/nmra/attachments/{attachment.id}/items/{item.id}/verify",
+        headers=headers,
+    )
+
+    assert response.status_code == 403
+
+    test_db.refresh(item)
+    assert item.review_status == "UNREVIEWED"
+
+
+def test_item_cannot_be_verified_twice(
+    client,
+    test_db,
+    make_employee,
+    nmra_test_item,
+):
+    _, headers = make_employee("REVIEWER")
+    _, attachment, item = nmra_test_item
+
+    url = (
+        f"/nmra/attachments/{attachment.id}/items/"
+        f"{item.id}/verify"
+    )
+
+    first = client.post(url, headers=headers)
+    assert first.status_code == 200, first.text
+
+    second = client.post(url, headers=headers)
+    assert second.status_code == 409
+
+    audits = test_db.scalars(
+        select(NMRAItemReviewAudit).where(
+            NMRAItemReviewAudit.item_id == item.id
+        )
+    ).all()
+
+    assert len(audits) == 1
+
+
+def test_approved_attachment_item_cannot_be_verified(
+    client,
+    test_db,
+    make_employee,
+    nmra_test_item,
+):
+    _, headers = make_employee("ADMIN")
+    _, attachment, item = nmra_test_item
+
+    attachment.review_status = "APPROVED"
+    test_db.flush()
+
+    response = client.post(
+        f"/nmra/attachments/{attachment.id}/items/{item.id}/verify",
+        headers=headers,
+    )
+
+    assert response.status_code == 409
+
+    test_db.refresh(item)
+    assert item.review_status == "UNREVIEWED"
+
+@pytest.mark.parametrize("role", ["ADMIN", "REVIEWER"])
+def test_authorized_employee_can_approve_attachment(
+    client,
+    test_db,
+    make_employee,
+    nmra_test_item,
+    role,
+):
+    employee, headers = make_employee(role)
+    _, attachment, item = nmra_test_item
+
+    item.review_status = "REVIEWED"
+    test_db.flush()
+
+    response = client.post(
+        f"/nmra/attachments/{attachment.id}/approve",
+        headers=headers,
+    )
+
+    assert response.status_code == 200, response.text
+
+    data = response.json()
+    assert data["review_status"] == "APPROVED"
+    assert data["total_approved_items"] == 1
+    assert data["approved_by_employee_id"] == employee.id
+    assert data["approved_at"] is not None
+
+    test_db.refresh(attachment)
+
+    assert attachment.review_status == "APPROVED"
+    assert attachment.approved_by == str(employee.id)
+    assert attachment.approved_at is not None
+
+
+def test_cannot_approve_unreviewed_items(
+    client,
+    test_db,
+    make_employee,
+    nmra_test_item,
+):
+    _, headers = make_employee("REVIEWER")
+    _, attachment, item = nmra_test_item
+
+    response = client.post(
+        f"/nmra/attachments/{attachment.id}/approve",
+        headers=headers,
+    )
+
+    assert response.status_code == 409
+    assert "reviewed" in response.json()["detail"].lower()
+
+    test_db.refresh(attachment)
+    assert attachment.review_status == "PENDING"
+    assert attachment.approved_at is None
+
+
+def test_cannot_approve_missing_row_number(
+    client,
+    test_db,
+    make_employee,
+    nmra_test_item,
+):
+    _, headers = make_employee("REVIEWER")
+    _, attachment, item = nmra_test_item
+
+    item.review_status = "REVIEWED"
+    item.row_number = None
+    test_db.flush()
+
+    response = client.post(
+        f"/nmra/attachments/{attachment.id}/approve",
+        headers=headers,
+    )
+
+    assert response.status_code == 409
+    assert "row numbers" in response.json()["detail"].lower()
+
+    test_db.refresh(attachment)
+    assert attachment.review_status == "PENDING"
+
+
+def test_cannot_approve_attachment_without_candidates(
+    client,
+    test_db,
+    make_employee,
+    nmra_test_item,
+):
+    _, headers = make_employee("ADMIN")
+    _, attachment, item = nmra_test_item
+
+    test_db.delete(item)
+    test_db.flush()
+
+    response = client.post(
+        f"/nmra/attachments/{attachment.id}/approve",
+        headers=headers,
+    )
+
+    assert response.status_code == 409
+    assert "no item candidates" in response.json()["detail"].lower()
+
+    test_db.refresh(attachment)
+    assert attachment.review_status == "PENDING"
+
+
+def test_cannot_approve_attachment_twice(
+    client,
+    test_db,
+    make_employee,
+    nmra_test_item,
+):
+    _, headers = make_employee("ADMIN")
+    _, attachment, item = nmra_test_item
+
+    item.review_status = "REVIEWED"
+    test_db.flush()
+
+    url = f"/nmra/attachments/{attachment.id}/approve"
+
+    first = client.post(url, headers=headers)
+    assert first.status_code == 200, first.text
+
+    second = client.post(url, headers=headers)
+    assert second.status_code == 409
+
+
+def test_viewer_cannot_approve_attachment(
+    client,
+    test_db,
+    make_employee,
+    nmra_test_item,
+):
+    _, headers = make_employee("VIEWER")
+    _, attachment, item = nmra_test_item
+
+    item.review_status = "REVIEWED"
+    test_db.flush()
+
+    response = client.post(
+        f"/nmra/attachments/{attachment.id}/approve",
+        headers=headers,
+    )
+
+    assert response.status_code == 403
+
+    test_db.refresh(attachment)
+    assert attachment.review_status == "PENDING"
+
+
+def test_approval_requires_authentication(
+    client,
+    nmra_test_item,
+):
+    _, attachment, _ = nmra_test_item
+
+    response = client.post(
+        f"/nmra/attachments/{attachment.id}/approve",
+    )
+
+    assert response.status_code == 401

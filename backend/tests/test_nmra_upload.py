@@ -12,6 +12,7 @@ from app.nmra_models import (
     NMRARegistration,
     NMRACertificateVersion,
     NMRAAttachment,
+    NMRAAttachmentItem,
     NMRADocumentPage,
 )
 import os
@@ -344,3 +345,210 @@ def test_reviewer_can_upload_nmra_documents(
     assert response.status_code == 201, response.text
     assert response.json()["d_number"] == d_number
     assert response.json()["version"] == 1
+
+def test_upload_automatically_saves_unreviewed_items(
+    client,
+    test_db,
+    make_employee,
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("NMRA_STORAGE_DIR", str(tmp_path))
+
+    def fake_extract(_pdf_path):
+        return [
+            {
+                "item_code": "BLT00001",
+                "product_description": None,
+                "page_number": 1,
+                "row_number": 1,
+                "evidence_text": "1 BLT00001 TEST PRODUCT",
+                "extraction_method": "OCR",
+                "review_status": "UNREVIEWED",
+            }
+        ]
+
+    monkeypatch.setattr(
+        "app.nmra_upload.extract_attachment_items",
+        fake_extract,
+    )
+
+    _, headers = make_employee("ADMIN")
+    d_number = f"TEST-{uuid4().hex}".upper()
+
+    response = client.post(
+        "/nmra/upload",
+        data={"d_number": d_number},
+        files=[
+            (
+                "certificate",
+                (
+                    "certificate.pdf",
+                    make_pdf("Certificate evidence"),
+                    "application/pdf",
+                ),
+            ),
+            (
+                "attachments",
+                (
+                    "attachment.pdf",
+                    make_pdf("Attachment evidence"),
+                    "application/pdf",
+                ),
+            ),
+        ],
+        headers=headers,
+    )
+
+    assert response.status_code == 201, response.text
+
+    attachment_id = response.json()["attachments"][0]["id"]
+
+    items = test_db.scalars(
+        select(NMRAAttachmentItem).where(
+            NMRAAttachmentItem.attachment_id == attachment_id
+        )
+    ).all()
+
+    assert len(items) == 1
+    assert items[0].item_code == "BLT00001"
+    assert items[0].review_status == "UNREVIEWED"
+
+    attachment = test_db.get(NMRAAttachment, attachment_id)
+    assert attachment.review_status == "PENDING"
+    assert attachment.approved_at is None
+    assert attachment.approved_by is None
+
+
+def test_upload_ocr_failure_rolls_back_and_cleans_files(
+    client,
+    test_db,
+    make_employee,
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("NMRA_STORAGE_DIR", str(tmp_path))
+
+    def failing_extract(_pdf_path):
+        raise RuntimeError("Simulated OCR failure")
+
+    monkeypatch.setattr(
+        "app.nmra_upload.extract_attachment_items",
+        failing_extract,
+    )
+
+    _, headers = make_employee("ADMIN")
+    d_number = f"TEST-{uuid4().hex}".upper()
+
+    # Depending on the application's exception handler,
+    # an unexpected OCR failure may propagate to TestClient.
+    from fastapi.testclient import TestClient
+
+    with TestClient(
+        app,
+        raise_server_exceptions=False,
+    ) as failure_client:
+        response = failure_client.post(
+            "/nmra/upload",
+            data={"d_number": d_number},
+            files=[
+                (
+                    "certificate",
+                    (
+                        "certificate.pdf",
+                        make_pdf("Certificate evidence"),
+                        "application/pdf",
+                    ),
+                ),
+                (
+                    "attachments",
+                    (
+                        "attachment.pdf",
+                        make_pdf("Attachment evidence"),
+                        "application/pdf",
+                    ),
+                ),
+            ],
+            headers=headers,
+        )
+
+    assert response.status_code >= 500
+
+    registration = test_db.scalar(
+        select(NMRARegistration).where(
+            NMRARegistration.d_number == d_number
+        )
+    )
+    assert registration is None
+
+    # No private PDFs should remain after the failed upload.
+    assert list(tmp_path.iterdir()) == []
+
+def test_upload_with_zero_candidates_requires_manual_review(
+    client,
+    test_db,
+    make_employee,
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("NMRA_STORAGE_DIR", str(tmp_path))
+
+    # Simulate a valid PDF with no recognizable item codes.
+    monkeypatch.setattr(
+        "app.nmra_upload.extract_attachment_items",
+        lambda _pdf_path: [],
+    )
+
+    _, headers = make_employee("ADMIN")
+    d_number = f"TEST-{uuid4().hex}".upper()
+
+    response = client.post(
+        "/nmra/upload",
+        data={"d_number": d_number},
+        files=[
+            (
+                "certificate",
+                (
+                    "certificate.pdf",
+                    make_pdf("Certificate evidence"),
+                    "application/pdf",
+                ),
+            ),
+            (
+                "attachments",
+                (
+                    "attachment.pdf",
+                    make_pdf("Supporting document without item codes"),
+                    "application/pdf",
+                ),
+            ),
+        ],
+        headers=headers,
+    )
+
+    assert response.status_code == 201, response.text
+
+    attachment_result = response.json()["attachments"][0]
+
+    assert attachment_result["candidate_count"] == 0
+    assert attachment_result["extraction_status"] == "REVIEW_REQUIRED"
+    assert attachment_result["review_status"] == "PENDING"
+    assert "Manual review required" in attachment_result["review_message"]
+
+    attachment = test_db.get(
+        NMRAAttachment,
+        attachment_result["id"],
+    )
+
+    assert attachment is not None
+    assert attachment.review_status == "PENDING"
+    assert attachment.approved_at is None
+    assert attachment.approved_by is None
+
+    items = test_db.scalars(
+        select(NMRAAttachmentItem).where(
+            NMRAAttachmentItem.attachment_id == attachment.id
+        )
+    ).all()
+
+    assert items == []

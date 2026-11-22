@@ -1,13 +1,20 @@
 import { API } from "../config";
 import { useCallback, useEffect, useState } from 'react'
 
-export default function NMRAReview({ token, employee, onLogout }) {
+export default function NMRAReview({
+  token,
+  employee,
+  onLogout,
+  attachmentId,
+}) {
   const [summary, setSummary] = useState(null)
   const [items, setItems] = useState([])
   const [searchTerm, setSearchTerm] = useState('')
   const [issueFilter, setIssueFilter] = useState('all')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [verifying, setVerifying] = useState(false)
+  const [approving, setApproving] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [selectedItem, setSelectedItem] = useState(null)
@@ -38,16 +45,30 @@ export default function NMRAReview({ token, employee, onLogout }) {
   }, [onLogout])
 
   const loadReview = useCallback(async () => {
-    try {
+    if (attachmentId == null) {
+     setLoading(false)
+     setSummary(null)
+     setItems([])
+     setSelectedItem(null)
+     setIsEditing(false)
+     setError('')
+     return
+  }
+
+  try {
       setLoading(true)
       setError('')
 
       const [summaryResponse, itemsResponse] = await Promise.all([
-        fetch(`${API}/nmra/attachments/1/review-summary`, {
-          headers,
+        fetch(`${API}/nmra/attachments/${attachmentId}/review-summary`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
         }),
-        fetch(`${API}/nmra/attachments/1/items`, {
-          headers,
+        fetch(`${API}/nmra/attachments/${attachmentId}/items`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
         }),
       ])
 
@@ -82,11 +103,19 @@ export default function NMRAReview({ token, employee, onLogout }) {
     } finally {
       setLoading(false)
     }
-  }, [token, handleUnauthorized])
+  }, [token, handleUnauthorized, attachmentId])
 
   useEffect(() => {
-    loadReview()
-  }, [loadReview])
+  const startReview = async () => {
+    await loadReview()
+  }
+
+  const task = Promise.resolve().then(startReview)
+
+  return () => {
+    void task
+  }
+}, [loadReview])
 
   function openCorrection(item) {
     setSelectedItem(item)
@@ -125,7 +154,7 @@ export default function NMRAReview({ token, employee, onLogout }) {
       setSuccess('')
 
       const response = await fetch(
-        `${API}/nmra/attachments/1/items/${selectedItem.id}`,
+        `${API}/nmra/attachments/${attachmentId}/items/${selectedItem.id}`,
         {
           method: 'PATCH',
           headers: {
@@ -171,6 +200,122 @@ export default function NMRAReview({ token, employee, onLogout }) {
     }
   }
 
+async function verifyItem(item) {
+  if (!canCorrect || summary?.attachment_status !== 'PENDING') {
+    setError('You cannot verify items in this attachment.')
+    return
+  }
+
+  if (item.review_status !== 'UNREVIEWED') {
+    setError('This item has already been reviewed.')
+    return
+  }
+
+  if (item.row_number == null || item.row_number < 1) {
+    setError(
+      'This item has no valid row number. Correct it before verification.'
+    )
+    return
+  }
+
+  try {
+    setVerifying(true)
+    setError('')
+    setSuccess('')
+
+    const response = await fetch(
+      `${API}/nmra/attachments/${attachmentId}/items/${item.id}/verify`,
+      {
+        method: 'POST',
+        headers,
+      }
+    )
+
+    if (handleUnauthorized(response)) return
+
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}))
+      throw new Error(
+        typeof data.detail === 'string'
+          ? data.detail
+          : 'Item verification failed.'
+      )
+    }
+
+    await loadReview()
+    setSuccess('Item verified successfully.')
+  } catch (err) {
+    setError(err.message || 'Item verification failed.')
+  } finally {
+    setVerifying(false)
+  }
+}
+
+async function approveAttachment() {
+  if (!canCorrect || summary?.attachment_status !== 'PENDING') {
+    setError('You do not have permission to approve this attachment.')
+    return
+  }
+
+  const eligible =
+    summary.total_candidates > 0 &&
+    summary.unreviewed === 0 &&
+    summary.reviewed === summary.total_candidates &&
+    items.every(
+      (item) =>
+        item.review_status === 'REVIEWED' &&
+        Number.isInteger(item.row_number) &&
+        item.row_number >= 1
+    )
+
+  if (!eligible) {
+    setError(
+      'Approval blocked. Every candidate must be reviewed and have a valid row number.'
+    )
+    return
+  }
+
+  const confirmed = window.confirm(
+    `Approve attachment "${summary.filename}"?\n\n` +
+    `This will approve ${summary.total_candidates} reviewed items.`
+  )
+
+  if (!confirmed) return
+
+  try {
+    setApproving(true)
+    setError('')
+    setSuccess('')
+
+    const response = await fetch(
+      `${API}/nmra/attachments/${attachmentId}/approve`,
+      {
+        method: 'POST',
+        headers,
+      }
+    )
+
+    if (handleUnauthorized(response)) return
+
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}))
+      throw new Error(
+        typeof data.detail === 'string'
+          ? data.detail
+          : 'Attachment approval failed.'
+      )
+    }
+
+    await loadReview()
+    setSuccess('Attachment approved successfully.')
+    setIsEditing(false)
+  } catch (err) {
+    setError(err.message || 'Attachment approval failed.')
+  } finally {
+    setApproving(false)
+  }
+}
+
   const filteredItems = items.filter((item) => {
     const search = searchTerm.trim().toLowerCase()
 
@@ -193,7 +338,18 @@ export default function NMRAReview({ token, employee, onLogout }) {
 
     return matchesSearch && matchesFilter
   })
-
+  if (attachmentId == null) {
+    return (
+      <section className="nmra-review">
+        <h2>NMRA Attachment Review</h2>
+        <p>
+         No attachment selected. Open My Documents,
+         choose a registration, and click Review Items
+         beside the attachment you want to review.
+        </p>
+      </section>
+    )
+  }
   if (loading) {
     return <p>Loading NMRA attachment review...</p>
   }
@@ -229,6 +385,31 @@ export default function NMRAReview({ token, employee, onLogout }) {
         <p>Missing row numbers: {summary.missing_row_numbers}</p>
       </div>
 
+{canCorrect && summary.attachment_status === 'PENDING' && (
+  <div style={{ marginTop: '16px', marginBottom: '20px' }}>
+    <button
+      type="button"
+      onClick={approveAttachment}
+      disabled={
+        approving ||
+        saving ||
+        verifying ||
+        summary.total_candidates === 0 ||
+        summary.unreviewed > 0 ||
+        summary.reviewed !== summary.total_candidates ||
+        summary.missing_row_numbers > 0
+      }
+    >
+      {approving ? 'Approving...' : 'Approve Attachment'}
+    </button>
+
+    <p style={{ fontSize: '13px', color: '#64748b' }}>
+      Approval requires every candidate to be reviewed
+      and every row number to be valid.
+    </p>
+  </div>
+)}
+
       {!canCorrect && (
         <p
           style={{
@@ -255,6 +436,12 @@ export default function NMRAReview({ token, employee, onLogout }) {
       )}
 
       <h3>Extracted Item Codes</h3>
+      {items.length === 0 && (
+        <p>
+          No extracted item candidates are available for this attachment.
+          The PDF may still have searchable page text in My Documents.
+        </p>
+      )}
 
       <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
         <input
@@ -339,6 +526,18 @@ export default function NMRAReview({ token, employee, onLogout }) {
             {selectedItem.evidence_text || 'No OCR evidence available'}
           </pre>
 
+          {canCorrect &&
+            summary.attachment_status === 'PENDING' &&
+            selectedItem.review_status === 'UNREVIEWED' && (
+              <button
+                type="button"
+                onClick={() => verifyItem(selectedItem)}
+                disabled={verifying || saving}
+                style={{ marginRight: '10px' }}
+              >
+                {verifying ? 'Verifying...' : 'Verify Item'}
+              </button>
+            )}
           {canCorrect && (
             <button
               type="button"

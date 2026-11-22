@@ -2,7 +2,6 @@
 import os
 from logging.config import fileConfig
 from pathlib import Path
-
 from alembic import context
 from dotenv import dotenv_values
 from sqlalchemy import create_engine, inspect, text
@@ -14,7 +13,6 @@ from app.database import Base
 # Register only the active application models.
 import app.db_models  # noqa: F401
 import app.nmra_models  # noqa: F401
-
 
 config = context.config
 
@@ -42,14 +40,24 @@ DATABASE_MODES = {
         "env_file": BACKEND_DIR / ".env.migration",
         "database": "dsh_document_ai_migration_sandbox",
     },
+    "rehearsal": {
+        "env_file": BACKEND_DIR / ".env.rehearsal",
+        "database": "dsh_document_ai_restore_rehearsal",
+    },
+    "live": {
+        "env_file": BACKEND_DIR / ".env",
+        "database": "dsh_document_ai",
+    },
 }
 
 target_metadata = Base.metadata
 
-
 def get_database_settings():
     mode = os.environ.get("DSH_ALEMBIC_TARGET", "test")
-
+    if mode == "live" and os.environ.get("DSH_ALLOW_LIVE_MIGRATION") != "YES":
+        raise RuntimeError(
+            "STOP: Live migration requires explicit authorization."
+    )
     if mode not in DATABASE_MODES:
         raise RuntimeError(
             "STOP: Invalid DSH_ALEMBIC_TARGET. "
@@ -129,7 +137,7 @@ def run_migrations_online():
                         f"{sorted(missing)}"
                     )
 
-            elif mode == "sandbox":
+            elif mode in {"sandbox", "rehearsal", "live"}:
                 # Permit either a completely empty sandbox
                 # or a previously migrated sandbox.
                 allowed_tables = EXPECTED_TABLES | {

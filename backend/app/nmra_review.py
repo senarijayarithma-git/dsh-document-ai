@@ -270,3 +270,175 @@ def correct_nmra_item(
         "reviewed_by_employee_id": employee.id,
         "audit_id": audit.id,
     }
+
+@router.post(
+    "/attachments/{attachment_id}/items/{item_id}/verify",
+)
+def verify_nmra_item(
+    attachment_id: int,
+    item_id: int,
+    db: Session = Depends(get_db),
+    employee: EmployeeUser = Depends(require_nmra_reviewer),
+):
+    # Lock the attachment to coordinate with corrections
+    # and future approval operations.
+    attachment = db.scalar(
+        select(NMRAAttachment)
+        .where(NMRAAttachment.id == attachment_id)
+        .with_for_update()
+    )
+
+    if attachment is None:
+        raise HTTPException(
+            status_code=404,
+            detail="NMRA attachment not found.",
+        )
+
+    if attachment.review_status != "PENDING":
+        raise HTTPException(
+            status_code=409,
+            detail="Only PENDING attachments can be reviewed.",
+        )
+
+    item = db.scalar(
+        select(NMRAAttachmentItem)
+        .where(
+            NMRAAttachmentItem.id == item_id,
+            NMRAAttachmentItem.attachment_id == attachment_id,
+        )
+        .with_for_update()
+    )
+
+    if item is None:
+        raise HTTPException(
+            status_code=404,
+            detail="NMRA item not found in this attachment.",
+        )
+
+    if item.review_status != "UNREVIEWED":
+        raise HTTPException(
+            status_code=409,
+            detail="This item has already been reviewed.",
+        )
+
+    previous_values = {
+        "item_code": item.item_code,
+        "product_description": item.product_description,
+        "page_number": item.page_number,
+        "row_number": item.row_number,
+        "review_status": item.review_status,
+    }
+
+    item.review_status = "REVIEWED"
+
+    new_values = {
+        **previous_values,
+        "review_status": "REVIEWED",
+    }
+
+    audit = NMRAItemReviewAudit(
+        item_id=item.id,
+        reviewed_by=str(employee.id),
+        action="VERIFY_ITEM",
+        previous_values=json.dumps(previous_values),
+        new_values=json.dumps(new_values),
+    )
+
+    db.add(audit)
+    db.commit()
+    db.refresh(item)
+
+    return {
+        "message": "NMRA item verified successfully.",
+        "item_id": item.id,
+        "attachment_id": attachment_id,
+        "review_status": item.review_status,
+        "reviewed_by_employee_id": employee.id,
+        "audit_id": audit.id,
+    }
+
+@router.post("/attachments/{attachment_id}/approve")
+def approve_nmra_attachment(
+    attachment_id: int,
+    db: Session = Depends(get_db),
+    employee: EmployeeUser = Depends(require_nmra_reviewer),
+):
+    # Lock the attachment to coordinate approval with
+    # concurrent item corrections and verifications.
+    attachment = db.scalar(
+        select(NMRAAttachment)
+        .where(NMRAAttachment.id == attachment_id)
+        .with_for_update()
+    )
+
+    if attachment is None:
+        raise HTTPException(
+            status_code=404,
+            detail="NMRA attachment not found.",
+        )
+
+    if attachment.review_status != "PENDING":
+        raise HTTPException(
+            status_code=409,
+            detail="Only PENDING attachments can be approved.",
+        )
+
+    items = db.scalars(
+        select(NMRAAttachmentItem)
+        .where(
+            NMRAAttachmentItem.attachment_id == attachment_id
+        )
+        .order_by(NMRAAttachmentItem.id)
+    ).all()
+
+    if not items:
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot approve an attachment with no item candidates.",
+        )
+
+    unreviewed = [
+        item.id
+        for item in items
+        if item.review_status != "REVIEWED"
+    ]
+
+    if unreviewed:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "All item candidates must be reviewed before approval. "
+                f"Unreviewed item IDs: {unreviewed[:20]}"
+            ),
+        )
+
+    invalid_rows = [
+        item.id
+        for item in items
+        if item.row_number is None or item.row_number < 1
+    ]
+
+    if invalid_rows:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "All item candidates must have valid row numbers. "
+                f"Invalid item IDs: {invalid_rows[:20]}"
+            ),
+        )
+
+    attachment.review_status = "APPROVED"
+    attachment.approved_at = datetime.now(timezone.utc)
+    attachment.approved_by = str(employee.id)
+
+    db.commit()
+    db.refresh(attachment)
+
+    return {
+        "message": "NMRA attachment approved successfully.",
+        "attachment_id": attachment.id,
+        "review_status": attachment.review_status,
+        "approved_at": attachment.approved_at,
+        "approved_by_employee_id": employee.id,
+        "total_approved_items": len(items),
+    }

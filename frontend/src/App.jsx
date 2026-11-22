@@ -5,17 +5,17 @@ import NMRAReview from './components/NMRAReview'
 import Login from './components/Login'
 import './App.css'
 import { API } from "./config";
-
+import NMRADocuments from './components/NMRADocuments'
+import NMRAUpload from './components/NMRAUpload'
 function App() {
   const [activePage, setActivePage] = useState('dashboard')
+  const [selectedAttachmentId, setSelectedAttachmentId] = useState(null)
   const [token, setToken] = useState(null)
   const [employee, setEmployee] = useState(null)
   const [authLoading, setAuthLoading] = useState(false)
 
   useEffect(() => {
     if (!token) {
-      setEmployee(null)
-      setAuthLoading(false)
       return
     }
 
@@ -68,9 +68,16 @@ function App() {
     setToken(accessToken)
   }
 
+  function openAttachmentReview(attachmentId) {
+    setSelectedAttachmentId(attachmentId)
+    setActivePage('nmra-review')
+    window.location.hash = 'nmra-review'
+  }
+
   function handleLogout() {
     setToken(null)
     setEmployee(null)
+    setSelectedAttachmentId(null)
     setActivePage('dashboard')
   }
 
@@ -110,7 +117,17 @@ function App() {
           >
             Upload Document
           </a>
-
+          {['ADMIN', 'REVIEWER'].includes(
+            String(employee.role).toUpperCase()
+          ) && (
+            <a
+              href="#nmra-upload"
+              className={`nav-link ${activePage === 'nmra-upload' ? 'active' : ''}`}
+              onClick={() => setActivePage('nmra-upload')}
+            >
+              Upload NMRA Certificate
+            </a>
+          )}
           <a
             href="#documents"
             className={`nav-link ${activePage === 'documents' ? 'active' : ''}`}
@@ -185,20 +202,28 @@ function App() {
         {activePage === 'upload' && (
           <DocumentUpload token={token} onLogout={handleLogout} />
         )}
-
-        {activePage === 'nmra-review' && (
-          <NMRAReview
+        {activePage === 'nmra-upload' && (
+          <NMRAUpload
             token={token}
             employee={employee}
             onLogout={handleLogout}
           />
         )}
+        {activePage === 'nmra-review' && (
+          <NMRAReview
+          token={token}
+          employee={employee}
+          onLogout={handleLogout}
+          attachmentId={selectedAttachmentId}
+          />
+        )}
 
         {activePage === 'documents' && (
-          <section>
-            <h1>My Documents</h1>
-            <p>This page is under development.</p>
-          </section>
+          <NMRADocuments
+          token={token}
+          onLogout={handleLogout}
+          onReviewAttachment={openAttachmentReview}
+          />
         )}
 
         {activePage === 'chatbot' && (

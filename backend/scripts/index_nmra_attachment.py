@@ -11,9 +11,7 @@ from sqlalchemy import func, select
 from app.database import SessionLocal
 from app.nmra_models import NMRAAttachment, NMRAAttachmentItem
 
-
-BACKEND_DIR = Path(__file__).resolve().parents[1]
-STORAGE_DIR = BACKEND_DIR / "storage"
+from app.nmra_storage import get_storage_root
 
 pytesseract.pytesseract.tesseract_cmd = (
     r"C:\Program Files\Tesseract-OCR\tesseract.exe"
@@ -164,14 +162,19 @@ def main():
 
         # Resolve the stored relative path beneath
         # the backend storage directory.
-        pdf_path = (
-            STORAGE_DIR / attachment.storage_key
-        ).resolve()
+        storage_root = get_storage_root()
 
-        if not pdf_path.is_relative_to(STORAGE_DIR.resolve()):
-            raise SystemExit(
-                "Unsafe attachment storage path."
-            )
+        if (
+            not attachment.storage_key
+            or Path(attachment.storage_key).name != attachment.storage_key
+            or not attachment.storage_key.lower().endswith(".pdf")
+        ):
+            raise SystemExit("Unsafe attachment storage key.")
+
+        pdf_path = (storage_root / attachment.storage_key).resolve()
+
+        if not pdf_path.is_relative_to(storage_root):
+            raise SystemExit("Unsafe attachment storage path.")
 
         if not pdf_path.is_file():
             raise SystemExit(
