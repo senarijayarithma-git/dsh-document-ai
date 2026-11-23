@@ -509,6 +509,7 @@ async def upload_and_verify_shipment(
     invoice_file: UploadFile = File(...),
     packing_list_file: UploadFile = File(...),
     air_waybill_file: UploadFile = File(...),
+    db: Session = Depends(get_db),
 ):
     import pytesseract
     from io import BytesIO
@@ -727,60 +728,55 @@ async def upload_and_verify_shipment(
                 "from_cache": False,
                 "extraction_source": "gemini_live",
             }
-        invoice = convert_invoice(extracted["invoice"])
+    invoice = convert_invoice(extracted["invoice"])
 
-        packing = convert_packing_list(extracted["packing_list"])
+    packing = convert_packing_list(extracted["packing_list"])
 
-        awb = convert_air_waybill(extracted["air_waybill"])
+    awb = convert_air_waybill(extracted["air_waybill"])
 
-        findings = validate_shipment(
-            invoice,
-            packing,
-            awb,
-            packing_filename=packing_list_file.filename or "unknown_packing_list.pdf",
-            awb_filename=air_waybill_file.filename or "unknown_air_waybill.pdf",
-            invoice_filename=invoice_file.filename or "unknown_invoice.pdf",
-        )
+    findings = validate_shipment(
+        invoice,
+        packing,
+        awb,
+        packing_filename=packing_list_file.filename or "unknown_packing_list.pdf",
+        awb_filename=air_waybill_file.filename or "unknown_air_waybill.pdf",
+        invoice_filename=invoice_file.filename or "unknown_invoice.pdf",
+    )
 
-        report = build_verification_report(findings)
+    report = build_verification_report(findings)
+    # Match invoice codes against approved internal NMRA evidence.
+    # A match does not establish official NMRA authorization.
+    approved_records = get_approved_nmra_item_records(db)
 
-        return {
-            "message": "Shipment verification completed",
-            "documents": {
-                key: {
-                    "filename": files[key].filename,
-                    "from_cache": extraction_sources[key]["from_cache"],
-                    "extraction_source": extraction_sources[key]["extraction_source"],
-                    "extracted_data": extracted[key],
-                }
-                for key in files
-            },
-            "summary": {
-                "total_checks": report["total_checks"],
-                **report["summary"],
-            },
-            "findings": report["findings"],
-            "report": report,
+    nmra_matches = [
+        {
+            "product_code": item.product_code,
+            **match_product_code_with_evidence(
+                item.product_code,
+                approved_records,
+            ),
         }
-        return {
-            "message": "Shipment verification completed",
-            "documents": {
-                key: {
-                    "filename": files[key].filename,
-                    "from_cache": extraction_sources[key]["from_cache"],
-                    "extraction_source": extraction_sources[key]["extraction_source"],
-                    "extracted_data": extracted[key],
-                }
-                for key in files
-            },
-            "summary": {
-                "total_checks": report["total_checks"],
-                **report["summary"],
-            },
-            "findings": report["findings"],
-            "report": report,
-        }
-
+        for item in invoice.items
+    ]
+    return {
+        "message": "Shipment verification completed",
+        "nmra_matches": nmra_matches,
+        "documents": {
+            key: {
+                "filename": files[key].filename,
+                "from_cache": extraction_sources[key]["from_cache"],
+                "extraction_source": extraction_sources[key]["extraction_source"],
+                "extracted_data": extracted[key],
+            }
+            for key in files
+        },
+        "summary": {
+            "total_checks": report["total_checks"],
+            **report["summary"],
+        },
+        "findings": report["findings"],
+        "report": report,
+    }
 
 @app.get("/documents", dependencies=[Depends(get_current_employee)])
 def get_documents(db: Session = Depends(get_db)):
