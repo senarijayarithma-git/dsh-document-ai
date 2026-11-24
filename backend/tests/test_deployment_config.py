@@ -10,8 +10,9 @@ def test_development_uses_localhost_defaults(monkeypatch):
     assert get_cors_origins() == [
         "http://localhost:5173",
         "http://127.0.0.1:5173",
+        "http://localhost:5174",
+        "http://127.0.0.1:5174",
     ]
-
 
 def test_production_requires_origins(monkeypatch):
     monkeypatch.setenv("APP_ENV", "production")

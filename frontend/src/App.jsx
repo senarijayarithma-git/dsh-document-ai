@@ -1,4 +1,4 @@
-
+import ShipmentVerification from './components/ShipmentVerification.jsx'
 import { useEffect, useState } from 'react'
 import DocumentUpload from './components/DocumentUpload'
 import NMRAReview from './components/NMRAReview'
@@ -117,6 +117,17 @@ function App() {
           >
             Upload Document
           </a>
+
+          <a
+            href="#shipment-verification"
+            className={`nav-link ${
+              activePage === 'shipment-verification' ? 'active' : ''
+            }`}
+            onClick={() => setActivePage('shipment-verification')}
+          >
+            Shipment Verification
+          </a>
+
           {['ADMIN', 'REVIEWER'].includes(
             String(employee.role).toUpperCase()
           ) && (
@@ -202,6 +213,14 @@ function App() {
         {activePage === 'upload' && (
           <DocumentUpload token={token} onLogout={handleLogout} />
         )}
+
+        {activePage === 'shipment-verification' && (
+          <ShipmentVerification
+            token={token}
+            onLogout={handleLogout}
+          />
+        )}
+
         {activePage === 'nmra-upload' && (
           <NMRAUpload
             token={token}

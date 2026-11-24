@@ -196,37 +196,62 @@ Document text:
 {text}
 """
 
-    # Retry temporary Gemini server errors
+    # Retry temporary Gemini server errors, with fallback.
     response = None
 
-    for attempt in range(3):
-        try:
-            response = client.models.generate_content(
-                model="gemini-3.8-flash",
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                    response_schema=schema,
-                    temperature=0,
-                ),
-            )
+    models = [
+        "gemini-3.8-flash",
+        "gemini-3.5-flash",
+    ]
+
+    for model_name in models:
+        for attempt in range(3):
+            try:
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        response_mime_type="application/json",
+                        response_schema=schema,
+                        temperature=0,
+                    ),
+                )
+                break
+
+            except errors.ServerError as exc:
+                if getattr(exc, "code", None) != 503:
+                    raise
+
+                if attempt == 2:
+                    print(
+                        f"{model_name} unavailable. "
+                        "Trying next model if available.",
+                        flush=True,
+                    )
+                    break
+
+                wait_seconds = 2 ** (attempt + 1)
+
+                print(
+                    f"{model_name} temporarily unavailable. "
+                    f"Retrying in {wait_seconds} seconds...",
+                    flush=True,
+                )
+
+                time.sleep(wait_seconds)
+
+        if response is not None:
             break
+    if response is None:
+        raise errors.ServerError(
+            503,
+            {"error": {
+                "code": 503,
+                "message": "All configured Gemini models are unavailable.",
+                "status": "UNAVAILABLE",
+            }},
+        )
 
-        except errors.ServerError:
-            if attempt == 2:
-                raise
-
-            wait_seconds = 2 ** (attempt + 1)
-
-            print(
-                f"Gemini temporarily unavailable. "
-                f"Retrying in {wait_seconds} seconds...",
-                flush=True
-            )
-
-            time.sleep(wait_seconds)
-
-    if response is None or not response.text:
+    if not response.text:
         raise ValueError("Gemini returned an empty response")
-
     return schema.model_validate_json(response.text)

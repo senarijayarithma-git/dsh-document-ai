@@ -4,10 +4,10 @@ from urllib.parse import urlsplit
 
 DEFAULT_CORS_ORIGINS = (
     "http://localhost:5173,"
-    "http://127.0.0.1:5173"
+    "http://127.0.0.1:5173,"
+    "http://localhost:5174,"
+    "http://127.0.0.1:5174"
 )
-
-
 def get_cors_origins() -> list[str]:
     app_env = os.getenv("APP_ENV", "development").strip().lower()
 
